@@ -2,3 +2,5 @@ data/
 .idea
 *.pdf
 *.tar.gz
+*.pkl
+*.zip
