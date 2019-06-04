@@ -4,3 +4,5 @@ data/
 *.tar.gz
 *.pkl
 *.zip
+*.csv
+__pycache__/
