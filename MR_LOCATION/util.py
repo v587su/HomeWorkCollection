@@ -38,10 +38,9 @@ def get_trail(data):
                     trails.append(trail_temp)
                 new_token = False
                 trail_temp = []
-            trail_temp.append(row[0])
+            trail_temp.append(str(row[0]))
             last_time = row[1]['MRTime']
     trails = split_trail(trails)
-    print([len(a) for a in trails])
     return trails
 
 
