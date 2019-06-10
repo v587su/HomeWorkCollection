@@ -1,5 +1,13 @@
 import pandas as pd
 import numpy as np
+import torch.cuda
+
+TRAIL_INTERVAL = 500
+TRAIL_LENGTH = 6
+USE_CUDA = torch.cuda.is_available()
+DEVICE = torch.device('cuda:0' if USE_CUDA else 'cpu')
+BATCH_SIZE = 32
+EPOCHS = 200
 
 
 def clean_matrix(matrix):
@@ -33,7 +41,7 @@ def get_trail(data):
         trail_temp = []
         new_token = True
         for row in i[1].iterrows():
-            if -20 > last_time - row[1]['MRTime']:
+            if -TRAIL_INTERVAL > last_time - row[1]['MRTime']:
                 if not new_token:
                     trails.append(trail_temp)
                 new_token = False
@@ -46,9 +54,17 @@ def get_trail(data):
 
 def split_trail(trails):
     trails_splited = []
-    for trail in trails:
-        while len(trail) > 30:
-            trails_splited.append(trail[:30])
-            trail = trail[30:]
+    for i, trail in enumerate(trails):
+        while len(trail) > TRAIL_LENGTH:
+            trails_splited.append(trail[:TRAIL_LENGTH])
+            trail = trail[TRAIL_LENGTH:]
+        if len(trail) < TRAIL_LENGTH:
+            trail = padding_trail(trail, trails_splited[-1])
         trails_splited.append(trail)
     return trails_splited
+
+
+def padding_trail(trail, last_trail):
+    padding_num = TRAIL_LENGTH - len(trail)
+    trail = last_trail[-padding_num:] + trail
+    return trail
