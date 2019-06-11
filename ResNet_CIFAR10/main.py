@@ -4,12 +4,19 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.optim
 import os
+import argparse
+import numpy as np
 
 from torch.utils.data import random_split
+from torchvision import transforms
 
-EPOCHS = 5
-LEARNING_RATE = 0.001
-BATCH_SIZE = 64
+EPOCHS = 30
+LEARNING_RATE = 0.01
+BATCH_SIZE = 128
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--loss', type=int, default=0)
+args = parser.parse_args()
 
 use_cuda = torch.cuda.is_available()
 device = torch.device('cuda:0' if use_cuda else 'cpu')
@@ -18,9 +25,47 @@ device = torch.device('cuda:0' if use_cuda else 'cpu')
 class MyLoss(nn.Module):
     def __init__(self):
         super(MyLoss, self).__init__()
+        self.ce = nn.CrossEntropyLoss()
+        self.l1 = nn.SmoothL1Loss()
 
     def forward(self, pre, real):
-        pass
+        labels_onehot = torch.FloatTensor(real.shape[0], 10).to(device)
+        labels_onehot.zero_()
+        labels_onehot.scatter_(1, labels.view(-1, 1), 1)
+        my_loss = self.ce(pre, real) + self.l1(pre, labels_onehot)
+        return my_loss
+
+
+class AverageLoss(nn.Module):
+    def __init__(self):
+        super(AverageLoss, self).__init__()
+        self.ce = nn.CrossEntropyLoss()
+        self.mse = nn.MSELoss()
+
+    def forward(self, pre, real):
+        labels_onehot = torch.FloatTensor(real.shape[0], 10).to(device)
+        labels_onehot.zero_()
+        labels_onehot.scatter_(1, labels.view(-1, 1), 1)
+        labels_onehot = 0.9 * labels_onehot + 0.1 * (1 - labels_onehot)
+        print(self.kl(pre, labels_onehot))
+        print(torch.mean(torch.log(pre)))
+        print(torch.log(pre))
+        average_loss = self.ce(pre, real) + self.mse(pre, labels_onehot)
+        return average_loss / 2
+
+
+class MSELoss(nn.Module):
+    def __init__(self):
+        super(MSELoss, self).__init__()
+        self.mse = nn.MSELoss()
+
+    def forward(self, pre, real):
+        labels_onehot = torch.FloatTensor(real.shape[0], 10).to(device)
+        labels_onehot.zero_()
+        labels_onehot.scatter_(1, labels.view(-1, 1), 1)
+        labels_onehot = 0.9 * labels_onehot + 0.1 * (1 - labels_onehot)
+        loss = self.mse(pre, labels_onehot)
+        return
 
 
 class BasicConv(nn.Module):
@@ -28,20 +73,20 @@ class BasicConv(nn.Module):
         super(BasicConv, self).__init__()
         self.model = nn.Sequential(
             nn.Conv2d(in_channels=in_channels, out_channels=16 * alpha,
-                      kernel_size=1, bias=True),
+                      kernel_size=1, bias=False),
             nn.BatchNorm2d(16 * alpha),
             nn.ReLU(),
             nn.Conv2d(in_channels=16 * alpha, out_channels=16 * alpha,
-                      kernel_size=3, padding=1, bias=True),
-            nn.BatchNorm2d(64 * alpha),
+                      kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(16 * alpha),
             nn.ReLU(),
             nn.Conv2d(in_channels=16 * alpha, out_channels=64 * alpha,
-                      kernel_size=1, bias=True),
+                      kernel_size=1, bias=False),
             nn.BatchNorm2d(64 * alpha),
         )
         self.jump = nn.Sequential(
             nn.Conv2d(in_channels=in_channels, out_channels=64 * alpha,
-                      kernel_size=1, bias=True),
+                      kernel_size=1, bias=False),
             nn.BatchNorm2d(64 * alpha),
         ) if layer_jump else nn.Sequential()
         self.relu = nn.ReLU()
@@ -104,7 +149,6 @@ class ResNet(nn.Module):
 
         self.model_linear = nn.Sequential(
             nn.Linear(512, 10),
-            nn.Softmax()
         )
 
         nn.init.kaiming_normal_(self.model_conv[0].weight, nonlinearity='relu')
@@ -119,9 +163,14 @@ class ResNet(nn.Module):
 
 file_path = os.path.dirname(os.path.abspath(__file__))
 
-data_transform = torchvision.transforms.Compose(
-    [torchvision.transforms.ToTensor()]
-)
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+data_transform = transforms.Compose([
+    transforms.RandomHorizontalFlip(),
+    transforms.RandomCrop(32, 4),
+    transforms.ToTensor(),
+    normalize,
+])
 train_set = torchvision.datasets.CIFAR10(os.path.join(file_path, 'data'),
                                          download=True, train=True,
                                          transform=data_transform)
@@ -138,11 +187,21 @@ loader_test = data.DataLoader(test_set, shuffle=False, batch_size=BATCH_SIZE)
 
 model = ResNet()
 model.cuda(device)
-loss = nn.CrossEntropyLoss()
+if args.loss == 0:
+    loss = MyLoss()
+elif args.loss == 1:
+    loss = nn.CrossEntropyLoss()
+elif args.loss == 2:
+    loss = MSELoss()
+elif args.loss == 3:
+    loss = AverageLoss()
+
 loss.cuda(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
 steps = len(loader_train)
+losses = []
+acces = []
 
 for epoch in range(EPOCHS):
     model.train()
@@ -159,6 +218,7 @@ for epoch in range(EPOCHS):
         if i % 10 == 0:
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
                   .format(epoch + 1, EPOCHS, i + 1, steps, loss_value.item()))
+        losses.append(loss_value.item())
 
     model.eval()
     eval_acc = 0
@@ -171,6 +231,7 @@ for epoch in range(EPOCHS):
         acc = num_correct / imgs.shape[0]
         eval_acc += acc
     print('Val ACC: {}'.format(eval_acc / len(loader_val)))
+    acces.append((eval_acc / len(loader_val)))
 
 model.eval()
 eval_acc = 0
@@ -186,7 +247,8 @@ for i, (imgs, labels) in enumerate(loader_test):
 final_acc = eval_acc / len(loader_test)
 print('Test ACC: {}'.format(final_acc))
 
-if final_acc > 0.8:
-    torch.save(model, 'model.pkl')
-else:
-    print('The performance is not well enough!')
+torch.save(model, 'model_{}.pkl'.format(args.loss))
+loss_np = np.array(losses, dtype=np.float)
+acc_np = np.array(acces, dtype=np.float)
+np.savetxt('loss_{}.csv'.format(args.loss), loss_np, delimiter=None)
+np.savetxt('acc_{}.csv'.format(args.loss), acc_np, delimiter=None)
