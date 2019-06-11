@@ -8,9 +8,15 @@ import numpy as np
 import os.path as path
 from util import *
 
+seed = 233
+torch.manual_seed(seed)
+torch.cuda.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
+np.random.seed(seed)
+
 
 class Trails(Dataset):
-    def __init__(self, d, t, m, normalize=None):
+    def __init__(self, d, t, m):
         super(Trails, self).__init__()
         label_list = ['Longitude', 'Latitude']
 
@@ -25,10 +31,11 @@ class Trails(Dataset):
             x = mm[:, ii]
             mm[:, ii] = (x - np.mean(x)) / np.std(x)
         mm = mm.reshape(-1, 6, 5)
+        sp = dd['Speed'].values
         self.mat = mm
         self.tra = t
         self.tgt = dd[label_list].values
-        self.speed = dd['Speed'].values
+        self.speed = (sp - np.mean(sp)) / np.std(sp)
 
     def __getitem__(self, idx):
         tra = self.tra[idx]
@@ -46,38 +53,48 @@ class CNN(nn.Module):
     def __init__(self):
         super(CNN, self).__init__()
         self.model = nn.Sequential(
-            nn.Conv2d(in_channels=6, out_channels=32, kernel_size=5,
+            nn.Conv2d(in_channels=6, out_channels=64, kernel_size=5,
                       padding=2),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
-            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=5,
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=5,
                       padding=2),
+            nn.BatchNorm2d(64),
             nn.LeakyReLU(),
             nn.MaxPool2d(kernel_size=2, stride=1),
             nn.Dropout(0.25),
-            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3,
+            nn.Conv2d(in_channels=64, out_channels=32, kernel_size=3,
                       padding=1),
+            nn.BatchNorm2d(32),
             nn.LeakyReLU(),
             nn.Conv2d(in_channels=32, out_channels=6, kernel_size=3,
                       padding=1),
+            nn.BatchNorm2d(6),
             nn.LeakyReLU(),
             nn.MaxPool2d(kernel_size=2, stride=1),
             nn.Dropout(0.25),
         )
-        self.linear = nn.Linear(12, 2)
-        self.relu = nn.LeakyReLU()
+        self.linear = nn.Sequential(
+            nn.Linear(12, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 15),
+            nn.LeakyReLU()
+        )
 
-        normalize_layer = [0, 2, 6, 8]
+        # normalize_layer = [0, 2, 6, 8]
+        normalize_layer = [0, 3, 8, 11]
         for i in normalize_layer:
             nn.init.kaiming_normal_(self.model[i].weight,
                                     nonlinearity='leaky_relu')
-        nn.init.kaiming_normal_(self.linear.weight,
+        nn.init.kaiming_normal_(self.linear[0].weight,
+                                nonlinearity='leaky_relu')
+        nn.init.kaiming_normal_(self.linear[2].weight,
                                 nonlinearity='leaky_relu')
 
     def forward(self, x):
         output = self.model(x)
         output = output.view(output.size(0), output.size(1), -1)
         output = self.linear(output)
-        output = self.relu(output)
         return output
 
 
@@ -85,22 +102,22 @@ class CLSTM(nn.Module):
     def __init__(self):
         super(CLSTM, self).__init__()
         self.cnn = CNN()
-        self.lstm = nn.LSTM(input_size=3, hidden_size=2,
-                            batch_first=True)
+        self.lstm = nn.LSTM(input_size=32, hidden_size=1,
+                            batch_first=True, bidirectional=True)
+        self.linear = nn.Sequential(
+            nn.Linear(16, 128),
+            nn.LeakyReLU(),
+            nn.Linear(128, 32),
+            nn.LeakyReLU()
+        )
 
     def forward(self, m, speed):
         # 先过cnn，出来的结果concat speed然后喂进lstm
-        # m = m.permute(1, 0, 2, 3)
-        # fea_list = []
-        # for batch in m:
-        #     fea = self.cnn(batch.view(-1, 1, 6, 5))
-        #     fea_list.append(fea.view(-1, 1, 2))
-        # fea_ts = torch.cat(fea_list, dim=1)
-
         fea = self.cnn(m)
         speed_size = speed.size()
         fea_speed = torch.cat((fea, speed.view(speed_size[0], -1, 1)),
                               dim=2)
+        fea_speed = self.linear(fea_speed)
         result, _ = self.lstm(fea_speed)
         return result
 
@@ -124,7 +141,7 @@ loss = nn.MSELoss()
 if USE_CUDA:
     model.cuda()
     loss.cuda()
-optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=L2_NORM)
 
 steps = len(train_data)
 for epoch in range(EPOCHS):
@@ -143,3 +160,19 @@ for epoch in range(EPOCHS):
         if i % 100 == 2:
             print('Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'
                   .format(epoch + 1, EPOCHS, i + 1, steps, loss_value.item()))
+
+model.eval()
+losses = []
+for i, (mat, tgt, speed) in enumerate(val_data):
+    mat = mat.to(device=DEVICE).double()
+    tgt = tgt.to(device=DEVICE).double()
+    speed = speed.to(device=DEVICE).double()
+    pre = model(mat, speed)
+    loss_value = loss(pre, tgt)
+    losses.append(loss_value.item())
+    pres = pre.cpu().detach().numpy().reshape(-1, 2)
+    tgts = tgt.cpu().detach().numpy().reshape(-1, 2)
+torch.save(model, 'model.pkl')
+pd.DataFrame(np.column_stack((pres, tgts))).to_csv('result.csv', header=False, index=False)
+print('mean loss:', np.mean(np.array(losses)))
+print('max loss:', np.max(np.array(losses)))
