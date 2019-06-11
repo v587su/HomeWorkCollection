@@ -6,8 +6,13 @@ TRAIL_INTERVAL = 500
 TRAIL_LENGTH = 6
 USE_CUDA = torch.cuda.is_available()
 DEVICE = torch.device('cuda:0' if USE_CUDA else 'cpu')
-BATCH_SIZE = 32
+BATCH_SIZE = 64
 EPOCHS = 200
+LEARNING_RATE = 0.01
+MIN_LON = 121.20120485
+MIN_LAT = 31.28175691
+MAX_LON = 121.21831882
+MAX_LAT = 31.29339344
 
 
 def clean_matrix(matrix):
@@ -31,6 +36,11 @@ def get_matrix(row, station):
                                                              on=['RNCID',
                                                                  'CellID'])
     matrix = clean_matrix(matrix)
+    # matrix['Longitude'] = matrix['Longitude'].sub(MIN_LON).div(
+    #     MAX_LON - MIN_LON)
+    # matrix['Latitude'] = matrix['Latitude'].sub(MIN_LAT).div(
+    #     MAX_LAT - MIN_LAT)
+    matrix = matrix[matrix.columns.difference(['RNCID', 'CellID'])]
     return matrix
 
 
@@ -68,3 +78,6 @@ def padding_trail(trail, last_trail):
     padding_num = TRAIL_LENGTH - len(trail)
     trail = last_trail[-padding_num:] + trail
     return trail
+
+
+

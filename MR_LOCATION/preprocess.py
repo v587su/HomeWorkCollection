@@ -12,6 +12,7 @@ def main(_data, _station):
         matrixs.append(matrix.values.reshape(-1))
     matrixs = np.array(matrixs)
     trail_idx = get_trail(_data)
+    print(matrixs)
     return matrixs, trail_idx
 
 

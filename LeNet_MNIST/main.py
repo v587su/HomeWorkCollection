@@ -10,7 +10,7 @@ import os
 
 EPOCHS = 5
 LEARNING_RATE = 0.001
-BATCH_SIZE = 64
+BATCH_SIZE = 32
 
 use_cuda = torch.cuda.is_available()
 device = torch.device('cuda:0' if use_cuda else 'cpu')
