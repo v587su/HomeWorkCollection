@@ -11,21 +11,21 @@ def main(_data, _station):
         matrix = get_matrix(row, _station)
         matrixs.append(matrix.values.reshape(-1))
     matrixs = np.array(matrixs)
+    print(matrixs.shape)
     trail_idx = get_trail(_data)
-    print(matrixs)
     return matrixs, trail_idx
 
 
 if __name__ == '__main__':
     crt_path = path.dirname(path.abspath(__file__))
-    data_path = path.join(crt_path, 'data_file', 'train_2g.csv')
+    data_path = path.join(crt_path, 'data_file', 'test_2g.csv')
     station_path = path.join(crt_path, 'data_file', 'gongcan.csv')
     data = pd.read_csv(data_path)
     station = pd.read_csv(station_path, index_col=['RNCID', 'CellID'])
     mat, trail = main(data, station)
     trail = [','.join(a) + '\n' for a in trail]
-    np.savetxt(path.join(crt_path, 'data_file', 'matrix.csv'), mat,
+    np.savetxt(path.join(crt_path, 'data_file', 'matrix_test.csv'), mat,
                delimiter=',')
-    f = open(path.join(crt_path, 'data_file', 'trail.csv'), 'w')
+    f = open(path.join(crt_path, 'data_file', 'trail_test.csv'), 'w')
     f.writelines(trail)
     f.close()
